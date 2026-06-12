@@ -13,3 +13,9 @@ media/
 *.log
 
 .DS_Store
+
+.tmp.*
+
+vectorstore/
+
+data/
