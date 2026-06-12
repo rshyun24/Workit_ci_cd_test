@@ -2,6 +2,7 @@ import os
 import sys
 from celery import shared_task
 
+MAX_CLAUSES = 3  # 시연용 조항 수 제한 (CPU 환경)
 
 @shared_task(bind=True)
 def analyze_document_task(self, doc_id):
@@ -39,18 +40,18 @@ def analyze_document_task(self, doc_id):
         )
         rag_results = results_to_json(clause_results)
 
-        # Step 3. sLLM 추론
+        # Step 3. sLLM 추론 (CPU 환경 대비 상위 MAX_CLAUSES개만)
         from jihye_inference import load_model, predict
 
         llm_model, tokenizer = load_model()
 
-        inference_results = []
-        total = len([r for r in rag_results if r.get('law_refs')])
+        # law_refs 있는 항목만 필터링 후 MAX_CLAUSES개 제한
+        filtered = [r for r in rag_results if r.get('law_refs')][:MAX_CLAUSES]
+        total = len(filtered)
         done = 0
 
-        for item in rag_results:
-            if not item.get('law_refs'):
-                continue
+        inference_results = []
+        for item in filtered:
             prediction = predict(
                 clause_text=item['clause_text'],
                 law_refs=item['law_refs'],
@@ -64,7 +65,6 @@ def analyze_document_task(self, doc_id):
                 'prediction':    prediction,
             })
             done += 1
-            # 진행률 업데이트 (0~100%)
             self.update_state(
                 state='PROGRESS',
                 meta={'current': done, 'total': total}
