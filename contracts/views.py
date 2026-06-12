@@ -1,4 +1,6 @@
 import json
+import os
+from django.http import HttpResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
@@ -85,43 +87,142 @@ def document_analyze(request, doc_id):
     })
 
 
+# @login_required
+# @require_POST
+# def document_ai_analyze(request, doc_id):
+#     """RAG + sLLM(EXAONE Fine-tuned) 기반 계약서 AI 분석"""
+#     import sys
+#     import os
+#     import traceback
+
+#     doc = get_object_or_404(ContractDocument, pk=doc_id, contract__created_by=request.user)
+
+#     # ── rag/, data/ 디렉토리를 import 경로에 추가 ──
+#     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+#     for extra_path in [
+#         os.path.join(BASE_DIR, 'rag'),
+#         os.path.join(BASE_DIR, 'data'),
+#     ]:
+#         if extra_path not in sys.path:
+#             sys.path.insert(0, extra_path)
+
+#     try:
+#         from contracts.utils import extract_text, parse_to_workit
+
+#         # ── Step 1. 파일에서 텍스트 추출 ──
+#         file_text = extract_text(doc.file.path)
+#         if not file_text.strip():
+#             return JsonResponse(
+#                 {'status': 'error', 'message': '텍스트를 추출할 수 없는 파일 형식입니다.'},
+#                 status=400,
+#             )
+
+#         # ── Step 2. RAG: 조항 청킹 + Qdrant 법령 검색 ──
+#         from sentence_transformers import SentenceTransformer
+#         from qdrant_client import QdrantClient
+#         from yoonha_contract_rag import review_contract, results_to_json
+
+#         QDRANT_PATH = os.path.join(BASE_DIR, 'vectorstore', 'qdrant_storage')
+#         embed_model = SentenceTransformer('BAAI/bge-m3')
+#         qdrant_client = QdrantClient(path=QDRANT_PATH)
+
+#         clause_results = review_contract(
+#             contract_text=file_text,
+#             client=qdrant_client,
+#             model=embed_model,
+#             risk_only=True,   # 위험 조항 관련 법령만 검색
+#         )
+#         # contract_review_output.json 과 동일한 구조의 list[dict]
+#         rag_results = results_to_json(clause_results)
+
+#         # ── Step 3. sLLM(EXAONE Fine-tuned) 추론 ──
+#         from jihye_inference import load_model, predict
+
+#         llm_model, tokenizer = load_model()
+
+#         inference_results = []
+#         for item in rag_results:
+#             if not item.get('law_refs'):
+#                 continue
+
+#             print(f"[{rag_results.index(item)+1}/{len(rag_results)}] 판정 중: {item['clause_number']}", flush=True)
+
+#             prediction = predict(
+#                 clause_text=item['clause_text'],
+#                 law_refs=item['law_refs'],
+#                 model=llm_model,
+#                 tokenizer=tokenizer,
+#             )
+#             inference_results.append({
+#                 'clause_number': item['clause_number'],
+#                 'clause_text':   item['clause_text'],
+#                 'risk_names':    item.get('risk_names', []),
+#                 'prediction':    prediction,
+#             })
+
+#         # ── Step 4. Workit 화면 형식으로 변환 ──
+#         parsed = parse_to_workit(inference_results)
+
+#         # ── Step 5. DB 저장 ──
+#         AIReviewResult.objects.update_or_create(
+#             document=doc,
+#             defaults={
+#                 'blanks':       parsed['blanks'],
+#                 'typos':        parsed['typos'],
+#                 'legal_issues': parsed['legal_issues'],
+#             },
+#         )
+
+#         total = (
+#             len(parsed['blanks'])
+#             + len(parsed['typos'])
+#             + len(parsed['legal_issues'])
+#         )
+#         return JsonResponse({
+#             'status':       'ok',
+#             'total':        total,
+#             'blanks':       parsed['blanks'],
+#             'typos':        parsed['typos'],
+#             'legal_issues': parsed['legal_issues'],
+#         })
+
+#     except Exception as e:
+#         traceback.print_exc()
+#         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
 @login_required
 @require_POST
 def document_ai_analyze(request, doc_id):
-    """AI 분석 실행 (mock 데이터 반환 - 실제 sLLM 연동 시 교체)"""
+    """AI 분석 태스크 시작"""
     doc = get_object_or_404(ContractDocument, pk=doc_id, contract__created_by=request.user)
+    from contracts.tasks import analyze_document_task
+    task = analyze_document_task.delay(doc_id)
+    return JsonResponse({'status': 'started', 'task_id': task.id})
 
-    mock_blanks = [
-        {"location": "p.3 · 3.2 사업 범위", "description": "총 사업비 금액이 공란입니다. 계약 체결 전 반드시 기재가 필요합니다.", "text": "본 사업의 총 사업비는 ( )원으로 하며, 부가가치세를 포함한다."},
-        {"location": "p.5 · 4.3 납품 일정", "description": "최종 납품일자가 기재되지 않았습니다.", "text": "최종 납품 기한은 ____년 __월 __일로 한다."},
-    ]
-    mock_typos = [
-        {"location": "p.4 · 4.1 과업 기간", "original": "검수 기관", "corrected": "검수 기간", "description": "\"검수 기관\" → \"검수 기간\"으로 추정되는 오탈자가 있습니다.", "text": "계약 체결일로부터 180일간 과업을 수행하며, 검수 기관은 30일로 한다."},
-        {"location": "p.7 · 5.1 과업 내용", "original": "분석·설계·구현·시흠", "corrected": "분석·설계·구현·시험", "description": "\"시흠\" → \"시험\"으로 추정되는 오탈자가 있습니다.", "text": "수급인은 과업내용서에 따라 시스템 분석·설계·구현·시흠을 수행한다."},
-    ]
-    mock_legal = [
-        {"location": "p.6 · 6.3 지체상금", "text": "계약상대자가 납품 기한 내에 계약을 이행하지 아니한 경우 지체상금을 부과한다.", "issue": "지체상금 요율 및 상한액이 명시되지 않아 분쟁 시 기준이 불명확할 수 있습니다.", "legal_ref": "국가계약법 시행령 제74조 관련"},
-        {"location": "p.8 · 7.1 하자보수", "text": "납품 후 하자 발생 시 수급인이 책임진다.", "issue": "하자보수 기간 및 범위가 불명확하게 기재되어 있어 추후 분쟁 소지가 있습니다.", "legal_ref": "국가계약법 시행령 제60조 관련"},
-        {"location": "p.9 · 8.2 지식재산권", "text": "본 사업의 결과물에 대한 권리는 발주기관에 귀속한다.", "issue": "오픈소스 등 제3자 지식재산권 처리 방식이 명시되지 않았습니다.", "legal_ref": "저작권법 제9조 관련"},
-    ]
 
-    result, _ = AIReviewResult.objects.update_or_create(
-        document=doc,
-        defaults={
-            'blanks': mock_blanks,
-            'typos': mock_typos,
-            'legal_issues': mock_legal,
-        }
-    )
+@login_required
+def document_ai_status(request, task_id):
+    """태스크 진행 상태 조회"""
+    from celery.result import AsyncResult
+    result = AsyncResult(task_id)
 
-    total = len(mock_blanks) + len(mock_typos) + len(mock_legal)
-    return JsonResponse({
-        'status': 'ok',
-        'total': total,
-        'blanks': mock_blanks,
-        'typos': mock_typos,
-        'legal_issues': mock_legal,
-    })
+    if result.state == 'PENDING':
+        return JsonResponse({'state': 'pending', 'current': 0, 'total': 1})
+
+    elif result.state == 'PROGRESS':
+        meta = result.info or {}
+        return JsonResponse({
+            'state': 'progress',
+            'current': meta.get('current', 0),
+            'total': meta.get('total', 1),
+        })
+
+    elif result.state == 'SUCCESS':
+        data = result.result or {}
+        return JsonResponse({'state': 'success', **data})
+
+    else:
+        return JsonResponse({'state': 'error', 'message': str(result.info)})
 
 
 @login_required
@@ -159,3 +260,61 @@ def contract_update_file(request, pk):
             original_filename=f.name,
         )
     return JsonResponse({'status': 'ok', 'filename': f.name})
+
+@login_required
+def document_page_image(request, doc_id, page):
+    doc = get_object_or_404(ContractDocument, pk=doc_id, contract__created_by=request.user)
+    
+    try:
+        from pdf2image import convert_from_path
+        import io, shutil, tempfile
+
+        poppler_path = r"C:\poppler-24.08.0\Library\bin"
+
+        # 한글 경로 문제 해결 - 임시 파일로 복사
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+            tmp_path = tmp.name
+            # print(f"tmp_path: {tmp_path}")
+            shutil.copy2(doc.file.path, tmp_path)
+
+        images = convert_from_path(
+            tmp_path,
+            dpi=150,
+            first_page=page,
+            last_page=page,
+            poppler_path=poppler_path,
+        )
+
+        os.unlink(tmp_path)  # 임시 파일 삭제
+
+        if not images:
+            return HttpResponse(status=404)
+
+        buf = io.BytesIO()
+        images[0].save(buf, format='PNG')
+        buf.seek(0)
+        return HttpResponse(buf.read(), content_type='image/png')
+
+    except Exception as e:
+        import traceback
+        return HttpResponse(traceback.format_exc(), content_type='text/plain', status=500)
+
+@login_required  
+def document_page_count(request, doc_id):
+    """PDF 총 페이지 수 반환"""
+    doc = get_object_or_404(ContractDocument, pk=doc_id, contract__created_by=request.user)
+    
+    try:
+        from pdf2image import pdfinfo_from_path
+        import io
+        
+        poppler_path = r"C:\poppler-24.08.0\Library\bin"
+
+        info = pdfinfo_from_path(
+            doc.file.path,
+            poppler_path=poppler_path if os.name == 'nt' else None,
+        )
+        return JsonResponse({'pages': info['Pages']})
+    
+    except Exception as e:
+        return JsonResponse({'pages': 1})

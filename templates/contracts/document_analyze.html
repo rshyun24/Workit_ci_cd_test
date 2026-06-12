@@ -18,20 +18,8 @@
 
     <div class="doc-viewer-body" id="docViewerBody">
       {% if doc.file %}
-      <div class="doc-mock-page">
-        <div class="page-num">- 1 -</div>
-        <h2>{{ contract.project_name }}</h2>
-        <p class="doc-mock-text">{{ contract.company_name }}(이하 "계약상대자"라 한다)은 「{{ contract.project_name }}」 사업의 수행을 위하여 다음과 같이 계약을 체결한다.</p>
-        <h3>제1조 (목적)</h3>
-        <p class="doc-mock-text">본 계약은 발주기관이 추진하는 정보화 사업의 효율적인 수행을 위한 소프트웨어의 분석·설계·구현·시험 및 이행에 관한 발주기관과 계약상대자 간의 권리·의무를 규정함을 목적으로 한다.</p>
-        <h3>제2조 (계약의 구성)</h3>
-        <p class="doc-mock-text">본 계약은 계약서, 과업내용서, 제안요청서(RFP), 요구사항정의서 및 계약상대자가 제출한 제안서로 구성되며, 상호 보완적 효력을 가진다.</p>
-      </div>
-      <div class="doc-mock-page">
-        <div class="page-num">- 3 -</div>
-        <h3>제3조 (사업 범위 및 사업비)</h3>
-        <p class="doc-mock-text">3.1 계약상대자는 과업내용서에 정한 범위에 따라 시스템 분석·설계·개발 및 시험을 성실히 수행한다.</p>
-        <p class="doc-mock-text highlight-blank">3.2 본 사업의 총 사업비는 ( )원으로 하며, 부가가치세를 포함한다.</p>
+      <div class="doc-viewer-body" id="docViewerBody" style="overflow-y:auto; padding:24px; gap:16px; display:flex; flex-direction:column; background:#F8F9FA;">
+        <div id="pdfPages"></div>
       </div>
       {% else %}
       <div class="doc-empty-state">
@@ -95,10 +83,30 @@ const DOC_ID = {{ doc.id }};
 window.onload = () => renderResults({{ result.blanks|safe }}, {{ result.typos|safe }}, {{ result.legal_issues|safe }});
 {% endif %}
 
+// function runAnalysis() {
+//   const btn = document.getElementById('btnAnalyze');
+//   btn.disabled = true;
+//   btn.innerHTML = '<span class="spinner"></span> 분석 중...';
+
+//   fetch(`/contracts/document/${DOC_ID}/ai-analyze/`, {
+//     method: 'POST',
+//     headers: {'X-CSRFToken': getCsrf()},
+//   })
+//   .then(r => r.json())
+//   .then(data => {
+//     if (data.status === 'ok') {
+//       document.getElementById('aiIntro').style.display = 'none';
+//       renderResults(data.blanks, data.typos, data.legal_issues);
+//     }
+//   });
+// }
+
 function runAnalysis() {
   const btn = document.getElementById('btnAnalyze');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> 분석 중...';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 분석 중...';
+  }
 
   fetch(`/contracts/document/${DOC_ID}/ai-analyze/`, {
     method: 'POST',
@@ -106,11 +114,33 @@ function runAnalysis() {
   })
   .then(r => r.json())
   .then(data => {
-    if (data.status === 'ok') {
-      document.getElementById('aiIntro').style.display = 'none';
-      renderResults(data.blanks, data.typos, data.legal_issues);
+    if (data.status === 'started') {
+      pollTaskStatus(data.task_id);
     }
   });
+}
+
+function pollTaskStatus(taskId) {
+  const interval = setInterval(() => {
+    fetch(`/contracts/task/${taskId}/status/`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.state === 'progress') {
+          const pct = Math.round((data.current / data.total) * 100);
+          const btn = document.getElementById('btnAnalyze');
+          if (btn) btn.innerHTML = `<span class="spinner"></span> 분석 중... ${pct}% (${data.current}/${data.total})`;
+
+        } else if (data.state === 'success') {
+          clearInterval(interval);
+          document.getElementById('aiIntro') && (document.getElementById('aiIntro').style.display = 'none');
+          renderResults(data.blanks || [], data.typos || [], data.legal_issues || []);
+
+        } else if (data.state === 'error') {
+          clearInterval(interval);
+          alert('분석 중 오류가 발생했습니다: ' + data.message);
+        }
+      });
+  }, 3000); // 3초마다 상태 확인
 }
 
 function renderResults(blanks, typos, legal) {
@@ -187,5 +217,37 @@ function completeReview() {
     if (data.status === 'ok') window.location.href = data.redirect;
   });
 }
+
+// PDF 페이지 이미지 로드
+(function() {
+  const container = document.getElementById('pdfPages');
+  if (!container) return;
+
+  const DOC_ID = {{ doc.id }};
+
+  // 총 페이지 수 가져오기
+  fetch(`/contracts/document/${DOC_ID}/pages/`)
+    .then(r => r.json())
+    .then(data => {
+      const total = data.pages || 1;
+      for (let p = 1; p <= total; p++) {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'background:#fff; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.08); overflow:hidden; position:relative;';
+        
+        const pageNum = document.createElement('div');
+        pageNum.textContent = `- ${p} -`;
+        pageNum.style.cssText = 'text-align:center; font-size:12px; color:#aaa; padding:8px 0;';
+        
+        const img = document.createElement('img');
+        img.src = `/contracts/document/${DOC_ID}/page/${p}/`;
+        img.style.cssText = 'width:100%; display:block;';
+        img.alt = `페이지 ${p}`;
+
+        wrap.appendChild(pageNum);
+        wrap.appendChild(img);
+        container.appendChild(wrap);
+      }
+    });
+  })();
 </script>
 {% endblock %}

@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "accounts",
     "contracts",
     "performance",
+    "django_celery_results",
 ]
 
 MIDDLEWARE = [
@@ -129,3 +130,17 @@ MEDIA_ROOT = BASE_DIR / 'media'            # 추가
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = "static/"
+
+# Celery 설정
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_CACHE_BACKEND = 'django-cache'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'socket_connect_timeout': 10,
+    'socket_timeout': 10,
+}
+# Redis 3.x 호환 설정
+CELERY_REDIS_SOCKET_CONNECT_TIMEOUT = 10

@@ -1,0 +1,100 @@
+"""
+contracts/utils.py
+
+- extract_text(): 업로드 파일에서 텍스트 추출 (PDF / DOCX / TXT)
+- parse_to_workit(): RAG+sLLM 결과 → Workit AIReviewResult 형식 변환
+"""
+
+
+def extract_text(file_path: str) -> str:
+    """업로드된 파일 경로를 받아 텍스트 문자열 반환."""
+    ext = file_path.lower().rsplit('.', 1)[-1]
+
+    if ext == 'pdf':
+        import pdfplumber
+        texts = []
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                t = page.extract_text()
+                if t:
+                    texts.append(t)
+        return '\n'.join(texts)
+
+    elif ext == 'docx':
+        from docx import Document
+        doc = Document(file_path)
+        return '\n'.join(p.text for p in doc.paragraphs if p.text.strip())
+
+    elif ext in ('txt', 'md', 'hwpx'):
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+
+    else:
+        # 지원하지 않는 형식 — 빈 문자열 반환, 호출부에서 처리
+        return ''
+
+
+def parse_to_workit(inference_results: list) -> dict:
+    """
+    jihye_inference.run_inference() 반환값 →  Workit AIReviewResult 형식으로 변환.
+
+    inference_results 각 항목 구조:
+    {
+        "clause_number": "제1조",
+        "clause_text":   "...",
+        "risk_names":    ["손해배상 범위 일방적 제한", ...],
+        "prediction":    "위험 조항입니다. 근거: ..."   ← sLLM 출력 텍스트
+    }
+
+    반환 형식 (AIReviewResult 모델에 저장):
+    {
+        "blanks":       [],   # RAG/sLLM 미지원 → 빈 리스트
+        "typos":        [],   # RAG/sLLM 미지원 → 빈 리스트
+        "legal_issues": [
+            {
+                "location":      "제1조",
+                "original_text": "...",
+                "issue":         "손해배상 범위 일방적 제한, ...",
+                "legal_ref":     "... (sLLM 판정 전문)"
+            },
+            ...
+        ]
+    }
+
+    필터링 기준:
+    - "판정: 정상" 항목 제외
+    - 동일 조항 번호 중복 제거 (첫 번째 위반/누락 항목만 사용)
+    """
+    legal_issues = []
+    seen_locations = set()
+
+    for item in inference_results:
+        prediction = (item.get('prediction') or '').strip()
+        risk_names = item.get('risk_names') or []
+        location = item.get('clause_number', '')
+
+        # sLLM 판정 결과 없는 항목 제외
+        if not prediction:
+            continue
+
+        # "판정: 정상" 항목 제외
+        if '판정: 정상' in prediction:
+            continue
+
+        # 동일 조항 번호 중복 제거
+        if location in seen_locations:
+            continue
+        seen_locations.add(location)
+
+        legal_issues.append({
+            'location':      location,
+            'original_text': item.get('clause_text', '')[:300],
+            'issue':         ', '.join(risk_names) if risk_names else '위험 조항 감지',
+            'legal_ref':     prediction,
+        })
+
+    return {
+        'blanks':       [],
+        'typos':        [],
+        'legal_issues': legal_issues,
+    }
