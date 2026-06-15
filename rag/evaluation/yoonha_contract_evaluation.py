@@ -19,7 +19,7 @@ from sentence_transformers import SentenceTransformer
 # ──────────────────────────────────────────
 # 0. 설정
 # ──────────────────────────────────────────
-QDRANT_PATH = "./qdrant_storage"
+# QDRANT_PATH = "./qdrant_storage"
 COLLECTION  = "law_kb"
 EMBED_MODEL = "BAAI/bge-m3"
 TOP_K       = 10        # Recall@5, @10 둘 다 커버
@@ -293,7 +293,8 @@ def main() -> None:
     print(f"\n📦 모델 로드: {EMBED_MODEL}")
     model = SentenceTransformer(EMBED_MODEL)
 
-    client = QdrantClient(path=QDRANT_PATH)
+    # client = QdrantClient(path=QDRANT_PATH)
+    client = QdrantClient(url="http://localhost:6333")
     count  = client.count(collection_name=COLLECTION)
     print(f"📚 Qdrant KB: {count.count}개 청크")
 

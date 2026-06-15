@@ -26,7 +26,7 @@ from sentence_transformers import SentenceTransformer
 # ──────────────────────────────────────────
 # 0. 설정
 # ──────────────────────────────────────────
-QDRANT_PATH = "./vectorstore/qdrant_storage"
+# QDRANT_PATH = "./vectorstore/qdrant_storage"
 COLLECTION = "law_kb"
 EMBED_MODEL = "BAAI/bge-m3"
 
@@ -315,7 +315,7 @@ def main() -> None:
     print(f"\n📦 모델 로드: {EMBED_MODEL}")
     model = SentenceTransformer(EMBED_MODEL)
 
-    client = QdrantClient(path=QDRANT_PATH)
+    client = QdrantClient(url="http://localhost:6333")
 
     try:
         count = client.count(collection_name=COLLECTION)
