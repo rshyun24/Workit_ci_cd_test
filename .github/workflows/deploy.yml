@@ -28,16 +28,31 @@ jobs:
       - name: Upload to S3
         run: aws s3 cp deploy.zip s3://workit-documents/deploy/deploy.zip
 
+      - name: Check if requirements.txt changed
+        id: req_check
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q "requirements.txt"; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy via SSM
         run: |
+          if [ "${{ steps.req_check.outputs.changed }}" = "true" ]; then
+            PIP_CMD="/home/ec2-user/Workit/venv/bin/pip install -r /home/ec2-user/Workit/requirements.txt"
+          else
+            PIP_CMD="echo 'requirements.txt unchanged, skipping pip install'"
+          fi
           aws ssm send-command \
             --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=[
-              "aws s3 cp s3://workit-documents/deploy/deploy.zip /home/ec2-user/deploy.zip",
-              "cd /home/ec2-user && unzip -o deploy.zip -d Workit",
-              "cd /home/ec2-user/Workit && /home/ec2-user/Workit/venv/bin/pip install -r requirements.txt",
-              "cd /home/ec2-user/Workit && /home/ec2-user/Workit/venv/bin/python manage.py migrate --noinput",
-              "cd /home/ec2-user/Workit && /home/ec2-user/Workit/venv/bin/python manage.py collectstatic --noinput",
-              "sudo systemctl restart gunicorn celery"
-            ]'
+            --timeout-seconds 600 \
+            --parameters "{\"commands\":[
+              \"aws s3 cp s3://workit-documents/deploy/deploy.zip /home/ec2-user/deploy.zip\",
+              \"cd /home/ec2-user && unzip -o deploy.zip -d Workit\",
+              \"$PIP_CMD\",
+              \"cd /home/ec2-user/Workit && /home/ec2-user/Workit/venv/bin/python manage.py migrate --noinput\",
+              \"cd /home/ec2-user/Workit && /home/ec2-user/Workit/venv/bin/python manage.py collectstatic --noinput\",
+              \"sudo systemctl restart gunicorn celery\"
+            ]}"
