@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
 SECRET_KEY = "django-insecure-8ss%o!+fz+rxppl%&)j!8i^--w-=7-e%f7=jt49%v$a4x8)9_l"
 DEBUG = True
