@@ -14,8 +14,8 @@ _DATA_DIR   = _THIS_DIR.parent / "data" / "export"
 CHUNKS_PATH  = _DATA_DIR / "chunks.json"
 VECTORS_PATH = _DATA_DIR / "vectors.npz"
 
-TOP_K   = 10
-FETCH_K = 20
+TOP_K   = 5
+FETCH_K = 10
 
 
 def load_db():
